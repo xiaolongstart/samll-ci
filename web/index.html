@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>samll-ci 控制台</title>
+<link rel="stylesheet" href="/vendor/oat/oat.min.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 控制台外壳：Oat 侧栏布局（登录视图由 app.js 渲染，此时隐藏外壳） -->
+  <div id="shell" data-sidebar-layout class="hidden">
+    <aside data-sidebar>
+      <header>
+        <a href="#/projects" class="logo" style="text-decoration:none">⚡ <b>samll-ci</b></a>
+        <p class="muted" style="font-size:.72rem;margin:4px 0 0">轻量 CI/CD 流水线</p>
+      </header>
+      <nav>
+        <ul>
+          <li><a href="#/projects" data-nav="projects">📁 项目</a></li>
+          <li><a href="#/builds" data-nav="builds">🔨 构建历史</a></li>
+          <li><a href="#/toolchains" data-nav="toolchains">🧰 工具链</a></li>
+          <li><a href="#/cache" data-nav="cache">💾 缓存管理</a></li>
+          <li><a href="#/settings" data-nav="settings">⚙️ 设置</a></li>
+        </ul>
+      </nav>
+      <footer>
+        <button id="logout-btn" class="outline small" style="width:100%">退出登录</button>
+      </footer>
+    </aside>
+    <main id="main"></main>
+  </div>
+
+  <!-- 登录视图 -->
+  <div id="login-view" class="hidden">
+    <div class="login-card card">
+      <h2 style="margin-bottom:4px">⚡ samll-ci</h2>
+      <p class="muted" style="margin-bottom:24px">轻量 CI/CD 流水线控制台</p>
+      <form id="login-form">
+        <label for="login-pwd">请输入登录密码</label>
+        <input id="login-pwd" type="password" placeholder="密码" autocomplete="current-password" required>
+        <button type="submit" class="full-w" style="margin-top:16px">登 录</button>
+      </form>
+      <p role="alert" id="login-err" class="hidden" style="margin-top:14px"></p>
+    </div>
+  </div>
+</div>
+
+<!-- 通用确认对话框（原生 dialog + Oat 样式） -->
+<dialog id="confirm-dialog">
+  <div style="padding:var(--space-5)">
+    <h3 id="confirm-title" style="font-size:1rem">确认操作</h3>
+    <p id="confirm-text" class="muted" style="margin:10px 0 20px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="outline" id="confirm-cancel">取消</button>
+      <button data-variant="danger" id="confirm-ok">确定</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="/vendor/oat/oat.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

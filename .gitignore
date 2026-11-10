@@ -1,0 +1,17 @@
+# 运行时数据目录
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# 本机构建产物
+/cicd
+/cicd-*
+dist/
+bin/
+
+# 系统与编辑器
+.DS_Store
+*.swp
+.idea/
+.vscode/
