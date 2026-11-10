@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -64,6 +65,8 @@ type RunOptions struct {
 	Env          []string          // 以 K=V 形式透传的环境变量
 	CacheVolumes map[string]string // 缓存目录名 → 容器内路径（空表示不挂载缓存）
 	ExtraBinds   []string          // 额外挂载（如 settings.xml）
+	MemoryLimitMB int              // 容器内存上限 MB（0 = 不限，对应 --memory）
+	CPULimit      int              // 容器 CPU 核数上限（0 = 不限，对应 --cpus）
 }
 
 // Run 用 docker run 在容器内执行脚本。
@@ -85,6 +88,12 @@ func (d *Docker) Run(ctx context.Context, opts RunOptions, script string, w io.W
 	}
 	for _, b := range opts.ExtraBinds {
 		args = append(args, "-v", b)
+	}
+	if opts.MemoryLimitMB > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", opts.MemoryLimitMB))
+	}
+	if opts.CPULimit > 0 {
+		args = append(args, "--cpus", strconv.Itoa(opts.CPULimit))
 	}
 	args = append(args, opts.Image, "sh", "-c", script)
 	return runCommand(ctx, "", nil, w, d.bin, args...)

@@ -87,11 +87,14 @@ func main() {
 
 func seedSettings(st *store.Store, dataDir string) {
 	defaults := map[string]string{
-		"auth.session_ttl": "86400",
-		"server.port":      "8080",
-		"docker.enabled":   "true",
-		"cache.root":       filepath.Join(dataDir, "cache"),
-		"default.timeout":  "3600",
+		"auth.session_ttl":      "86400",
+		"server.port":           "8080",
+		"docker.enabled":        "true",
+		"cache.root":            filepath.Join(dataDir, "cache"),
+		"default.timeout":       "3600",
+		"build.mem_limit_mib":   "384",
+		"build.max_cpu_cores":   "0",
+		"gradle.no_daemon":      "true",
 	}
 	for k, v := range defaults {
 		cur, err := st.GetSetting(k)

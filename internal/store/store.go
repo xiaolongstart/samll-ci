@@ -54,6 +54,7 @@ func (s *Store) migrate() error {
 			deploy_cmds   TEXT DEFAULT '',
 			timeout       INTEGER DEFAULT 3600,
 			cache_enabled INTEGER DEFAULT 1,
+			mem_limit_mib INTEGER DEFAULT 0,
 			created_at    TEXT DEFAULT (datetime('now','localtime')),
 			updated_at    TEXT DEFAULT (datetime('now','localtime'))
 		)`,
@@ -88,6 +89,13 @@ func (s *Store) migrate() error {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("初始化表结构失败: %w", err)
 		}
+	}
+	// 旧库升级（列已存在时忽略）
+	alters := []string{
+		`ALTER TABLE project ADD COLUMN mem_limit_mib INTEGER DEFAULT 0`,
+	}
+	for _, stmt := range alters {
+		_, _ = s.db.Exec(stmt) // duplicate column 错误忽略
 	}
 	return nil
 }
@@ -156,19 +164,21 @@ type Project struct {
 	DeployCmds   string `json:"deploy_cmds"` // 换行分隔
 	Timeout      int    `json:"timeout"`     // 秒
 	CacheEnabled bool   `json:"cache_enabled"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	// MemLimitMB 项目级内存护栏覆盖（0 = 继承全局设置 build.mem_limit_mib）
+	MemLimitMB int    `json:"mem_limit_mib"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 const projectCols = `id,name,git_url,branch,token,build_mode,toolchain_id,docker_image,dockerfile,image_tag,
-build_cmds,output_dir,deploy_cmds,timeout,cache_enabled,created_at,updated_at`
+build_cmds,output_dir,deploy_cmds,timeout,cache_enabled,mem_limit_mib,created_at,updated_at`
 
 func scanProject(row interface{ Scan(...any) error }) (*Project, error) {
 	p := &Project{}
 	var cacheEnabled int
 	err := row.Scan(&p.ID, &p.Name, &p.GitURL, &p.Branch, &p.Token, &p.BuildMode, &p.ToolchainID,
 		&p.DockerImage, &p.Dockerfile, &p.ImageTag,
-		&p.BuildCmds, &p.OutputDir, &p.DeployCmds, &p.Timeout, &cacheEnabled, &p.CreatedAt, &p.UpdatedAt)
+		&p.BuildCmds, &p.OutputDir, &p.DeployCmds, &p.Timeout, &cacheEnabled, &p.MemLimitMB, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -216,10 +226,10 @@ func (s *Store) CreateProject(p *Project) (int64, error) {
 	}
 	res, err := s.db.Exec(`INSERT INTO project
 		(name,git_url,branch,token,build_mode,toolchain_id,docker_image,dockerfile,image_tag,
-		 build_cmds,output_dir,deploy_cmds,timeout,cache_enabled)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 build_cmds,output_dir,deploy_cmds,timeout,cache_enabled,mem_limit_mib)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.Name, p.GitURL, p.Branch, p.Token, p.BuildMode, p.ToolchainID, p.DockerImage, p.Dockerfile, p.ImageTag,
-		p.BuildCmds, p.OutputDir, p.DeployCmds, p.Timeout, boolInt(p.CacheEnabled))
+		p.BuildCmds, p.OutputDir, p.DeployCmds, p.Timeout, boolInt(p.CacheEnabled), p.MemLimitMB)
 	if err != nil {
 		return 0, err
 	}
@@ -237,9 +247,9 @@ func (s *Store) UpdateProject(p *Project) error {
 	}
 	_, err := s.db.Exec(`UPDATE project SET name=?,git_url=?,branch=?,token=?,build_mode=?,toolchain_id=?,
 		docker_image=?,dockerfile=?,image_tag=?,build_cmds=?,output_dir=?,deploy_cmds=?,timeout=?,cache_enabled=?,
-		updated_at=datetime('now','localtime') WHERE id=?`,
+		mem_limit_mib=?,updated_at=datetime('now','localtime') WHERE id=?`,
 		p.Name, p.GitURL, p.Branch, p.Token, p.BuildMode, p.ToolchainID, p.DockerImage, p.Dockerfile, p.ImageTag,
-		p.BuildCmds, p.OutputDir, p.DeployCmds, p.Timeout, boolInt(p.CacheEnabled), p.ID)
+		p.BuildCmds, p.OutputDir, p.DeployCmds, p.Timeout, boolInt(p.CacheEnabled), p.MemLimitMB, p.ID)
 	return err
 }
 

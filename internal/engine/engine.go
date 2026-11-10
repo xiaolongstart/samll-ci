@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -309,7 +311,7 @@ func (e *Engine) stageBuild(ctx context.Context, proj *store.Project, workDir st
 		return e.runDocker(ctx, proj, workDir, script, lw)
 	default:
 		env := e.buildShellEnv(proj, lw)
-		return e.shell.Run(ctx, workDir, script, env, lw)
+		return e.shell.Run(ctx, workDir, e.wrapCPU(script), env, lw)
 	}
 }
 
@@ -358,7 +360,7 @@ func (e *Engine) stageDeploy(ctx context.Context, proj *store.Project, workDir s
 		return nil
 	}
 	env := e.buildShellEnv(proj, lw)
-	return e.shell.Run(ctx, workDir, executor.JoinLines(cmds), env, lw)
+	return e.shell.Run(ctx, workDir, e.wrapCPU(executor.JoinLines(cmds)), env, lw)
 }
 
 // runDocker 在容器内构建（模式①）；工具链 settings.xml 以只读挂载注入。
@@ -379,6 +381,27 @@ func (e *Engine) runDocker(ctx context.Context, proj *store.Project, workDir str
 			opts.Env = append(opts.Env, containerCacheEnv(dir, cpath)...)
 		}
 	}
+	// 内存护栏（与 Shell 模式一致；项目级覆盖优先）
+	if mem := e.memLimit(proj); mem > 0 {
+		opts.MemoryLimitMB = mem
+		if !optsEnvKey(opts, "NODE_OPTIONS") {
+			opts.Env = append(opts.Env, fmt.Sprintf("NODE_OPTIONS=--max-old-space-size=%d", mem))
+		}
+		if !optsEnvKey(opts, "JAVA_TOOL_OPTIONS") {
+			opts.Env = append(opts.Env, fmt.Sprintf("JAVA_TOOL_OPTIONS=-Xmx%dm", mem))
+		}
+		if !optsEnvKey(opts, "GOMEMLIMIT") {
+			opts.Env = append(opts.Env, fmt.Sprintf("GOMEMLIMIT=%dMiB", mem))
+		}
+	}
+	// CPU 护栏（设置页「最大 CPU 核数」，0 = 不限）
+	if n := e.settingInt("build.max_cpu_cores", 0); n > 0 {
+		opts.CPULimit = n
+	}
+	// Gradle daemon（与 Shell 模式一致）
+	if !optsEnvKey(opts, "GRADLE_OPTS") && e.settingOrDefault("gradle.no_daemon", "true") != "false" {
+		opts.Env = append(opts.Env, "GRADLE_OPTS=-Dorg.gradle.daemon=false")
+	}
 	if proj.ToolchainID > 0 {
 		if tc, err := e.store.GetToolchain(proj.ToolchainID); err == nil {
 			if p, err := e.tcMgr.SettingsFile(tc); err == nil && p != "" {
@@ -388,6 +411,14 @@ func (e *Engine) runDocker(ctx context.Context, proj *store.Project, workDir str
 		}
 	}
 	return e.docker.Run(ctx, opts, script, lw)
+}
+
+// memLimit 构建内存护栏（MB）：项目级覆盖优先，0 = 用全局设置。
+func (e *Engine) memLimit(proj *store.Project) int {
+	if proj.MemLimitMB > 0 {
+		return proj.MemLimitMB
+	}
+	return e.settingInt("build.mem_limit_mib", 384)
 }
 
 // buildShellEnv 组装 Shell 模式环境变量（缓存路径 + 工具链注入 + 国内镜像代理）。
@@ -411,6 +442,29 @@ func (e *Engine) buildShellEnv(proj *store.Project, lw *buildLogger) []string {
 	}
 	if _, ok := env["npm_config_registry"]; !ok {
 		env["npm_config_registry"] = e.settingOrDefault("mirror.npm_registry", "https://registry.npmmirror.com")
+	}
+	// 内存护栏（设置页「最大内存使用 MB」或项目级覆盖，0 = 不限）：
+	// 按技术栈映射为对应护栏；宿主已显式配置时尊重现有值
+	if mem := e.memLimit(proj); mem > 0 {
+		nodeOpts := []string{}
+		if _, ok := env["NODE_OPTIONS"]; !ok {
+			nodeOpts = append(nodeOpts, fmt.Sprintf("--max-old-space-size=%d", mem))
+			// 512M 兼容：小新生代降低 RSS 峰值（GC 更频繁，时间换内存）
+			if semi := e.settingInt("node.semi_space_mib", 0); semi > 0 {
+				nodeOpts = append(nodeOpts, fmt.Sprintf("--max-semi-space-size=%d", semi))
+			}
+			env["NODE_OPTIONS"] = strings.Join(nodeOpts, " ")
+		}
+		if _, ok := env["JAVA_TOOL_OPTIONS"]; !ok {
+			env["JAVA_TOOL_OPTIONS"] = fmt.Sprintf("-Xmx%dm", mem)
+		}
+		if _, ok := env["GOMEMLIMIT"]; !ok {
+			env["GOMEMLIMIT"] = fmt.Sprintf("%dMiB", mem)
+		}
+	}
+	// Gradle 默认禁用 daemon：小内存机器上驻留的 daemon（双 JVM）会持续吃内存
+	if _, ok := env["GRADLE_OPTS"]; !ok && e.settingOrDefault("gradle.no_daemon", "true") != "false" {
+		env["GRADLE_OPTS"] = "-Dorg.gradle.daemon=false"
 	}
 
 	var binPrepend []string
@@ -488,6 +542,29 @@ func (e *Engine) settingOrDefault(key, def string) string {
 	return v
 }
 
+// settingInt 读取整型全局设置（非法/负值回退默认）。
+func (e *Engine) settingInt(key string, def int) int {
+	v := e.settingOrDefault(key, "")
+	if v == "" {
+		return def
+	}
+	if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+		return n
+	}
+	return def
+}
+
+// optsEnvKey 检查 RunOptions.Env 中是否已包含某个变量。
+func optsEnvKey(o executor.RunOptions, key string) bool {
+	prefix := key + "="
+	for _, kv := range o.Env {
+		if strings.HasPrefix(kv, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // defaultDockerImage 未配置镜像时按工具链类型给出推荐基础镜像（见文档 §7.2）。
 func (e *Engine) defaultDockerImage(proj *store.Project) string {
 	if proj.ToolchainID > 0 {
@@ -507,6 +584,24 @@ func (e *Engine) defaultDockerImage(proj *store.Project) string {
 		}
 	}
 	return "alpine:3.19"
+}
+
+// wrapCPU 根据设置页「最大 CPU 核数」限制构建命令的 CPU 使用：
+// Linux 且 taskset 可用时以绑核方式执行；其他平台或 0 = 不限。
+func (e *Engine) wrapCPU(script string) string {
+	n := e.settingInt("build.max_cpu_cores", 0)
+	if n <= 0 || runtime.GOOS != "linux" {
+		return script
+	}
+	if _, err := exec.LookPath("taskset"); err != nil {
+		return script
+	}
+	return fmt.Sprintf("taskset -c 0-%d sh -c %s", n-1, shellQuoteSingle(script))
+}
+
+// shellQuoteSingle POSIX 单引号安全转义。
+func shellQuoteSingle(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // containerCacheEnv 容器内缓存环境变量。

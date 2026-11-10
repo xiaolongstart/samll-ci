@@ -29,3 +29,17 @@ func TestRedactGitURL(t *testing.T) {
 		t.Fatal("无 token URL 不应变")
 	}
 }
+
+func TestShellQuoteSingle(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"echo hi", "'echo hi'"},
+		{"echo it's", `'echo it'\''s'`},
+		{"a\nb 'c'", `'a
+b '\''c'\'''`},
+	}
+	for _, c := range cases {
+		if got := shellQuoteSingle(c.in); got != c.want {
+			t.Errorf("shellQuoteSingle(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

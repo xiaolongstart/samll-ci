@@ -284,6 +284,7 @@ async function viewProjectForm(id) {
         <div class="muted mt">默认模板：<a class="link" data-tpl="node">Node</a> · <a class="link" data-tpl="maven">Java/Maven</a> · <a class="link" data-tpl="gradle">Gradle</a> · <a class="link" data-tpl="go">Go</a> · <a class="link" data-tpl="bun">Bun</a></div></div>
       <div class="field"><label>产物输出目录（相对仓库根，可空）</label><input id="f-output" value="${esc(p.output_dir || '')}" placeholder="如 dist / target"></div>
       <div class="field"><label>超时（秒）</label><input id="f-timeout" type="number" value="${p.timeout || 3600}" min="10"></div>
+      <div class="field"><label>内存上限覆盖（MB，0 = 用全局设置；重项目可单独放宽）</label><input id="f-mem-limit" type="number" value="${p.mem_limit_mib || 0}" min="0" placeholder="0 = 继承全局"></div>
       <div class="field full"><label>部署命令（构建成功后执行，可空）</label><textarea id="f-deploy" placeholder="systemctl restart myapp">${esc(p.deploy_cmds || '')}</textarea></div>
       <div class="switch-row full"><input id="f-cache" type="checkbox" ${p.cache_enabled === false ? '' : 'checked'}><label for="f-cache">启用构建缓存（依赖/编译缓存跨次复用）</label></div>
     </div>
@@ -321,6 +322,7 @@ async function viewProjectForm(id) {
       deploy_cmds: $('#f-deploy').value,
       timeout: +$('#f-timeout').value || 3600,
       cache_enabled: $('#f-cache').checked,
+      mem_limit_mib: +$('#f-mem-limit').value || 0,
     };
     if (!body.name || !body.git_url) { toast('项目名与 Git 地址必填', true); return; }
     try {
@@ -594,6 +596,12 @@ async function viewSettings() {
         <div class="field full"><label>缓存根目录</label><input id="s-cache-root" value="${esc(s['cache.root'] || '')}"></div>
         <div class="field"><label>Go 模块代理 GOPROXY（构建时注入）</label><input id="s-goproxy" value="${esc(s['mirror.goproxy'] || '')}" placeholder="默认 https://goproxy.cn,direct"></div>
         <div class="field"><label>npm registry（构建时注入）</label><input id="s-npm-registry" value="${esc(s['mirror.npm_registry'] || '')}" placeholder="默认 https://registry.npmmirror.com"></div>
+        <div class="field"><label>最大内存使用（MB，0 = 不限）</label><input id="s-mem-limit" type="number" value="${esc(s['build.mem_limit_mib'] || 384)}" placeholder="默认 384"></div>
+        <div class="field"><label>最大 CPU 核数（0 = 不限）</label><input id="s-cpu-limit" type="number" value="${esc(s['build.max_cpu_cores'] || 0)}" placeholder="默认 0 = 不限"></div>
+        <div class="field"><label>Node 新生代 MB（--max-semi-space-size，小内存降 RSS，0 = 默认）</label><input id="s-semi-space" type="number" value="${esc(s['node.semi_space_mib'] || 0)}" placeholder="默认 0 = 不设置"></div>
+        <div class="field"><label>Gradle daemon（小内存机器建议禁用）</label>
+          <select id="s-gradle-daemon"><option value="true" ${s['gradle.no_daemon'] !== 'false' ? 'selected' : ''}>禁用（构建完即释放内存）</option><option value="false" ${s['gradle.no_daemon'] === 'false' ? 'selected' : ''}>启用（多项目构建更快）</option></select></div>
+        <div class="field full muted" style="align-self:end">内存护栏自动映射：Node → --max-old-space-size，JVM → JAVA_TOOL_OPTIONS(-Xmx)，Go → GOMEMLIMIT，Docker → --memory；CPU 护栏：Docker → --cpus，Shell → Linux taskset 绑核（构建/部署阶段）。
       </div>
       <div class="form-actions"><button id="s-save">保存设置</button></div>
     </div>
@@ -615,6 +623,10 @@ async function viewSettings() {
         'cache.root': $('#s-cache-root').value,
         'mirror.goproxy': $('#s-goproxy').value,
         'mirror.npm_registry': $('#s-npm-registry').value,
+        'build.mem_limit_mib': $('#s-mem-limit').value,
+        'build.max_cpu_cores': $('#s-cpu-limit').value,
+        'gradle.no_daemon': $('#s-gradle-daemon').value,
+        'node.semi_space_mib': $('#s-semi-space').value,
       });
       toast('设置已保存（端口修改需重启生效）');
     } catch (e) { toast(e.message, true); }

@@ -596,7 +596,8 @@ func (s *Server) handleCacheClear(w http.ResponseWriter, r *http.Request) {
 }
 
 var publicSettings = []string{"auth.session_ttl", "server.port", "docker.enabled", "cache.root", "default.timeout",
-	"mirror.goproxy", "mirror.npm_registry"}
+	"mirror.goproxy", "mirror.npm_registry", "build.mem_limit_mib", "build.max_cpu_cores", "gradle.no_daemon",
+	"node.semi_space_mib"}
 
 func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	out := map[string]string{}

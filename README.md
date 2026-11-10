@@ -27,6 +27,8 @@ samll-ci 是为**资源极有限的机器**（1 核 / 512M 内存）设计的轻
 - **🐳 双构建模式** — 本机 Shell + Docker（① 容器内构建 ② 产物打镜像，Dockerfile 字段区分，构建前自动探测引擎）
 - **🧰 自定义工具链** — 下载地址可指向内网镜像源；Maven `settings.xml` 可视化配置；也支持直接登记宿主已有工具
 - **🇨🇳 国内镜像开箱即用** — 工具链「在线版本」一键获取（清华 Adoptium / 腾讯云 / npmmirror / golang.google.cn）；构建自动注入 `GOPROXY`（goproxy.cn）与 npm registry（npmmirror）
+- **🛡 512M 内存护栏** — 设置页直接配置**最大内存使用**与**最大 CPU 核数**，自动映射到各栈：
+  Node `--max-old-space-size`、JVM `JAVA_TOOL_OPTIONS(-Xmx)`、Go `GOMEMLIMIT`、Docker `--memory/--cpus`、Shell Linux `taskset` 绑核；Gradle 可禁用 daemon 防内存驻留
 - **💾 构建缓存** — Maven / Gradle / npm / Go / Bun 依赖与编译缓存跨次构建持久复用，一键清理
 - **🔒 简单鉴权** — 单账号密码登录（bcrypt + 随机 session token），满足内网自用
 - **📜 日志与状态** — 构建历史 + 状态徽章 + SSE 实时日志流（流式落盘，不占内存）
