@@ -285,6 +285,7 @@ async function viewProjectForm(id) {
       <div class="field"><label>产物输出目录（相对仓库根，可空）</label><input id="f-output" value="${esc(p.output_dir || '')}" placeholder="如 dist / target"></div>
       <div class="field"><label>超时（秒）</label><input id="f-timeout" type="number" value="${p.timeout || 3600}" min="10"></div>
       <div class="field"><label>内存上限覆盖（MB，0 = 用全局设置；重项目可单独放宽）</label><input id="f-mem-limit" type="number" value="${p.mem_limit_mib || 0}" min="0" placeholder="0 = 继承全局"></div>
+      <div class="switch-row full"><input id="f-skip-built" type="checkbox" ${p.skip_built_commit == 1 ? 'checked' : ''}><label for="f-skip-built">同 commit 已成功构建则跳过（复用产物，需配置产物目录）</label></div>
       <div class="field full"><label>部署命令（构建成功后执行，可空）</label><textarea id="f-deploy" placeholder="systemctl restart myapp">${esc(p.deploy_cmds || '')}</textarea></div>
       <div class="switch-row full"><input id="f-cache" type="checkbox" ${p.cache_enabled === false ? '' : 'checked'}><label for="f-cache">启用构建缓存（依赖/编译缓存跨次复用）</label></div>
     </div>
@@ -323,6 +324,7 @@ async function viewProjectForm(id) {
       timeout: +$('#f-timeout').value || 3600,
       cache_enabled: $('#f-cache').checked,
       mem_limit_mib: +$('#f-mem-limit').value || 0,
+      skip_built_commit: $('#f-skip-built').checked ? 1 : 0,
     };
     if (!body.name || !body.git_url) { toast('项目名与 Git 地址必填', true); return; }
     try {

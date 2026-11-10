@@ -105,9 +105,17 @@ func (e *Engine) worker(ctx context.Context) {
 }
 
 // Trigger 触发构建：创建 pending 记录并入队。
+// 若项目开启"同 commit 跳过"且最近一次成功构建的 commit 与远程 HEAD 一致、产物存在，
+// 则直接创建 success 记录复用产物，不再排队（对 512M 小内存机器避免重复大构建）。
 func (e *Engine) Trigger(projectID int64) (int64, error) {
-	if _, err := e.store.GetProject(projectID); err != nil {
+	proj, err := e.store.GetProject(projectID)
+	if err != nil {
 		return 0, err
+	}
+	if proj.SkipBuiltCommit == 1 && strings.TrimSpace(proj.OutputDir) != "" {
+		if id, reused := e.tryReuseLastBuild(proj); reused {
+			return id, nil
+		}
 	}
 	id, err := e.store.CreateBuild(projectID, "")
 	if err != nil {
@@ -124,6 +132,63 @@ func (e *Engine) Trigger(projectID int64) (int64, error) {
 		_ = e.store.SetBuildStatus(id, "failed", "")
 		return 0, fmt.Errorf("构建队列已满，请稍后重试")
 	}
+}
+
+// tryReuseLastBuild 判断是否可复用最近一次成功构建的产物。
+// 条件：远程 HEAD commit 与最近成功构建一致，且产物目录非空。
+func (e *Engine) tryReuseLastBuild(proj *store.Project) (int64, bool) {
+	last, err := e.store.LastBuildOfProject(proj.ID)
+	if err != nil || last == nil || last.Status != "success" || last.GitCommit == "" {
+		return 0, false
+	}
+	outDir := filepath.Join(e.dataDir, "outputs", strconv.FormatInt(proj.ID, 10))
+	if !outDirHasFiles(outDir) {
+		return 0, false
+	}
+	head := e.remoteHead(proj)
+	if head == "" || head != last.GitCommit {
+		return 0, false
+	}
+	// 创建 success 记录并写说明日志
+	id, err := e.store.CreateBuild(proj.ID, "")
+	if err != nil {
+		return 0, false
+	}
+	logPath := filepath.Join(e.dataDir, "logs", fmt.Sprintf("%d.log", id))
+	_ = e.store.SetBuildLogPath(id, logPath)
+	_ = e.store.SetBuildStatus(id, "success", head)
+	lw := newBuildLogger(logPath)
+	defer lw.Close()
+	lw.printf("===== 构建 #%d 项目[%s] 跳过 =====\n", id, proj.Name)
+	lw.printf("远程 HEAD %s 与最近成功构建一致，产物已存在（%s），按项目配置跳过构建、直接复用。\n",
+		head[:min(8, len(head))], outDir)
+	log.Printf("[引擎] 项目 %d commit %s 已有成功产物，构建 #%d 跳过", proj.ID, head[:min(8, len(head))], id)
+	return id, true
+}
+
+// remoteHead 查询远程仓库分支 HEAD commit（git ls-remote，15s 超时；失败返回空串不阻塞构建）。
+func (e *Engine) remoteHead(proj *store.Project) string {
+	url := rewriteGitURL(proj.GitURL, proj.Token)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "ls-remote", url,
+		"refs/heads/"+proj.Branch).Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func outDirHasFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 // Cancel 取消进行中的构建。
